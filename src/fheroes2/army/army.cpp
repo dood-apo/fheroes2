@@ -350,12 +350,14 @@ bool Troops::isValid() const
     return false;
 }
 
-uint32_t Troops::GetOccupiedSlotCount() const
+uint32_t Troops::GetOccupiedSlotCount( const Monster & mons ) const
 {
     uint32_t total = 0;
+    const int monsterID = mons.GetID();
     for ( const_iterator it = begin(); it != end(); ++it ) {
-        if ( ( *it )->isValid() )
+        if ( ( *it )->isValid() && ( monsterID == Monster::UNKNOWN || ( *it )->isMonster( monsterID ) ) ) {
             ++total;
+        }
     }
     return total;
 }
@@ -433,13 +435,23 @@ bool Troops::JoinTroop( const Monster & mons, const uint32_t count, const bool e
         return troop->isValid() && troop->isMonster( mons.GetID() );
     };
 
-    const auto iter = emptySlotFirst ? findBestMatch( isSlotEmpty, isSameMonster ) : findBestMatch( isSameMonster, isSlotEmpty );
+    auto iter = emptySlotFirst ? findBestMatch( isSlotEmpty, isSameMonster ) : findBestMatch( isSameMonster, isSlotEmpty );
     if ( iter == end() ) {
         return false;
     }
 
     if ( ( *iter )->isValid() ) {
-        ( *iter )->SetCount( ( *iter )->GetCount() + count );
+        const auto n_dest_stacks = GetOccupiedSlotCount( mons );
+        assert( n_dest_stacks > 0 );
+        
+        // add the reminder to the first stack
+        ( *iter )->SetCount( ( *iter )->GetCount() + count % n_dest_stacks );
+
+        for ( uint32_t i = 0; i < n_dest_stacks; i++ ) {
+            // keep on adding to the destination stacks
+            ( *iter )->SetCount( ( *iter )->GetCount() + count / n_dest_stacks );
+            iter = std::find_if( iter + 1, end(), isSameMonster );
+        }
     }
     else {
         ( *iter )->Set( mons, count );
@@ -1418,7 +1430,7 @@ void Army::MoveTroops( Army & from, const int monsterIdToKeep )
     assert( this != &from );
 
     // Combine troops of the same type in one slot to leave more room for new troops to join
-    MergeSameMonsterTroops();
+    from.MergeSameMonsterTroops();
 
     // Heroes need to have at least one occupied slot in their army, while garrisons do not need this
     const bool fromHero = from.GetCommander() && from.GetCommander()->isHeroes();
@@ -1427,43 +1439,6 @@ void Army::MoveTroops( Army & from, const int monsterIdToKeep )
 #endif
 
     assert( ( !fromHero || from.isValid() ) && ( !toHero || isValid() ) );
-
-    if ( monsterIdToKeep != Monster::UNKNOWN ) {
-        // Find a troop stack in the destination stack set consisting of monsters we need to keep
-        const auto keepIter = std::find_if( begin(), end(), [monsterIdToKeep]( const Troop * troop ) {
-            assert( troop != nullptr );
-
-            return troop->isValid() && troop->GetID() == monsterIdToKeep;
-        } );
-
-        // Find a troop stack in the source stack set consisting of monsters of a different type than the monster we need to keep
-        const auto xchgIter = std::find_if( from.begin(), from.end(), [monsterIdToKeep]( const Troop * troop ) {
-            assert( troop != nullptr );
-
-            return troop->isValid() && troop->GetID() != monsterIdToKeep;
-        } );
-
-        // If we found both, then exchange the monster to keep in the destination stack set with the found troop stack in the
-        // source stack set to concentrate all the monsters to keep in the source stack set
-        if ( keepIter != end() && xchgIter != from.end() ) {
-            Troop * keep = *keepIter;
-            Troop * xchg = *xchgIter;
-
-            const uint32_t count = keep->GetCount();
-
-            keep->Reset();
-
-            if ( !JoinTroop( *xchg ) ) {
-                assert( 0 );
-            }
-
-            xchg->Reset();
-
-            if ( !from.JoinTroop( Monster( monsterIdToKeep ), count, false ) ) {
-                assert( 0 );
-            }
-        }
-    }
 
     const auto moveTroops = [this, &from, monsterIdToKeep, fromHero]( const bool ignoreMonstersToKeep ) {
         uint32_t stacksLeft = from.GetOccupiedSlotCount();

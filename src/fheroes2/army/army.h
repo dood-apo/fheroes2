@@ -75,7 +75,7 @@ public:
 
     double getReinforcementValue( const Troops & reinforcement ) const;
 
-    uint32_t GetOccupiedSlotCount() const;
+    uint32_t GetOccupiedSlotCount( const Monster & = Monster() ) const;
     bool isValid() const;
     bool HasMonster( const Monster & ) const;
 
